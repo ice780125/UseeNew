@@ -25,6 +25,19 @@
 | 淘宝 | 长图 / 竖版主图 | 800 × 1200 | 2:3 | 72 DPI | JPG/PNG | ≤ 3MB |
 | 淘宝 | PC 端详情页 | 750 × 不限 | — | 72 DPI | JPG/PNG | — |
 | 淘宝 | 手机端详情页 | 640 × ≤1300 | — | 72 DPI | JPG/PNG | — |
+| LinkedIn | 头像 | 400 × 400 | 1:1 | 72 DPI | JPG/PNG | — |
+| LinkedIn | 背景横幅 | 1584 × 396 | 4:1 | 72 DPI | JPG/PNG | — |
+| LinkedIn | Logo | 300 × 300 | 1:1 | 72 DPI | JPG/PNG | — |
+| LinkedIn | 封面图 | 1128 × 191 | 1128:191 | 72 DPI | JPG/PNG | — |
+| LinkedIn | 生活页面主图 | 1128 × 376 | 3:1 | 72 DPI | JPG/PNG | — |
+| LinkedIn | 方形图片 | 1200 × 1200 | 1:1 | 72 DPI | JPG/PNG | — |
+| LinkedIn | 横向图片 | 1200 × 627 | 400:209 | 72 DPI | JPG/PNG | — |
+| LinkedIn | 竖向图片 | 1080 × 1350 | 4:5 | 72 DPI | JPG/PNG | — |
+| LinkedIn | 链接预览图 | 1200 × 627 | 400:209 | 72 DPI | JPG/PNG | — |
+| LinkedIn | 文章头图（16:9） | 1280 × 720 | 16:9 | 72 DPI | JPG/PNG | — |
+| LinkedIn | 单图广告 | 1200 × 627 | 400:209 | 72 DPI | JPG/PNG | — |
+| LinkedIn | 轮播广告 | 1080 × 1080 | 1:1 | 72 DPI | JPG/PNG | — |
+| LinkedIn | 视频广告封面 | 1280 × 720 | 16:9 | 72 DPI | JPG/PNG | — |
 | 自定义 | 用户输入 | 自定义 × 自定义 | 自动计算 | 自定义 | 自定义 | — |
 
 ---
@@ -104,6 +117,33 @@ PC 端详情页:        宽 750 px，高度不限
 
 ---
 
+### 💼 LinkedIn
+
+```
+头像:              400 × 400   px  (1:1)
+背景横幅:         1584 × 396   px  (4:1)
+Logo:              300 × 300   px  (1:1)
+封面图:           1128 × 191   px
+生活页面主图:     1128 × 376   px  (3:1)
+方形图片:         1200 × 1200  px  (1:1)
+横向图片:         1200 × 627   px  (400:209)
+竖向图片:         1080 × 1350  px  (4:5)
+链接预览图:       1200 × 627   px  (400:209)
+文章头图（16:9）: 1280 × 720   px  (16:9)
+单图广告:         1200 × 627   px  (400:209)
+轮播广告:         1080 × 1080  px  (1:1)
+视频广告封面:     1280 × 720   px  (16:9)
+色彩模式:         RGB
+分辨率:           72 DPI
+```
+
+**注意事项：**
+- 个人资料背景横幅在移动端可能被裁切，重要文案与 Logo 建议居中安全区
+- 封面图（1128×191）高度较矮，适合横幅式构图，避免竖版主体被裁切
+- 动态帖文横向 / 链接预览 / 单图广告共用 1200×627，可按同一画布规范出图
+
+---
+
 ### ✏️ 自定义尺寸
 
 当用户选择「自定义」时，接受以下输入：
@@ -136,7 +176,7 @@ function calcRatio(width, height) {
 ### 平台选择器数据结构
 
 ```ts
-type Platform = 'douyin' | 'xiaohongshu' | 'mobile-poster' | 'taobao' | 'custom'
+type Platform = 'douyin' | 'xiaohongshu' | 'mobile-poster' | 'taobao' | 'linkedin' | 'custom'
 
 interface CanvasPreset {
   platform: Platform

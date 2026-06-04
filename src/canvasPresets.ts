@@ -35,6 +35,19 @@ export const CANVAS_PRESETS: CanvasPreset[] = [
   { id: "taobao-long", label: "Taobao", scene: "Vertical long", width: 800, height: 1200, ratio: "2:3", dpi: 72, maxFileSize: "3MB" },
   { id: "taobao-pc-detail", label: "Taobao", scene: "PC detail slice", width: 750, height: 0, ratio: "fluid height", dpi: 72, notes: "Width 750px; height as long as design needs" },
   { id: "taobao-m-detail", label: "Taobao", scene: "Mobile detail", width: 640, height: 1300, ratio: "≤1300px tall", dpi: 72, notes: "Single slice max height 1300px" },
+  { id: "linkedin-avatar", label: "LinkedIn", scene: "Avatar", width: 400, height: 400, ratio: "1:1", dpi: 72 },
+  { id: "linkedin-banner", label: "LinkedIn", scene: "Profile background banner", width: 1584, height: 396, ratio: "4:1", dpi: 72 },
+  { id: "linkedin-logo", label: "LinkedIn", scene: "Logo", width: 300, height: 300, ratio: "1:1", dpi: 72 },
+  { id: "linkedin-cover", label: "LinkedIn", scene: "Cover image", width: 1128, height: 191, ratio: "1128:191", dpi: 72 },
+  { id: "linkedin-life-hero", label: "LinkedIn", scene: "Life page hero", width: 1128, height: 376, ratio: "3:1", dpi: 72 },
+  { id: "linkedin-square", label: "LinkedIn", scene: "Square post image", width: 1200, height: 1200, ratio: "1:1", dpi: 72 },
+  { id: "linkedin-landscape", label: "LinkedIn", scene: "Landscape post image", width: 1200, height: 627, ratio: "400:209", dpi: 72 },
+  { id: "linkedin-portrait", label: "LinkedIn", scene: "Portrait post image", width: 1080, height: 1350, ratio: "4:5", dpi: 72 },
+  { id: "linkedin-link-preview", label: "LinkedIn", scene: "Link preview image", width: 1200, height: 627, ratio: "400:209", dpi: 72 },
+  { id: "linkedin-article-header", label: "LinkedIn", scene: "Article header (16:9)", width: 1280, height: 720, ratio: "16:9", dpi: 72 },
+  { id: "linkedin-ad-single", label: "LinkedIn", scene: "Single-image ad", width: 1200, height: 627, ratio: "400:209", dpi: 72 },
+  { id: "linkedin-ad-carousel", label: "LinkedIn", scene: "Carousel ad", width: 1080, height: 1080, ratio: "1:1", dpi: 72 },
+  { id: "linkedin-ad-video-cover", label: "LinkedIn", scene: "Video ad cover", width: 1280, height: 720, ratio: "16:9", dpi: 72 },
 ];
 
 export type CustomCanvasInput = {

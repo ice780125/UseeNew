@@ -7,6 +7,22 @@ import path from "path";
 import { fileURLToPath } from "url";
 import express from "express";
 import cors from "cors";
+import {
+  bearerToken,
+  createSession,
+  destroySession,
+  getSessionUser,
+  requireAuth,
+  verifyCredentials,
+} from "./auth.js";
+import {
+  MEMBERSHIP_EXPIRED_MSG,
+  PAYMENT_REQUIRED_MSG,
+  ensureMembershipStarted,
+  getAccountStatus,
+  isAccessBlocked,
+  recordSuccessfulGeneration,
+} from "./quota.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIST_DIR = path.join(__dirname, "..", "dist");
@@ -161,7 +177,62 @@ app.get("/api/health", (_req, res) => {
   res.json({ ok: true, model: MODEL });
 });
 
-app.post("/api/generate", async (req, res) => {
+function blockedLoginResponse(res, status) {
+  const code = status.membership.isExpired ? "MEMBERSHIP_EXPIRED" : "PAYMENT_REQUIRED";
+  const error = status.blockReason || PAYMENT_REQUIRED_MSG;
+  res.status(403).json({ error, code, ...status });
+}
+
+app.post("/api/auth/login", (req, res) => {
+  const { username, password } = req.body || {};
+  const user = verifyCredentials(username, password);
+  if (!user) {
+    res.status(401).json({ error: "Invalid username or password" });
+    return;
+  }
+  ensureMembershipStarted(user);
+  const status = getAccountStatus(user);
+  if (status.accessBlocked) {
+    blockedLoginResponse(res, status);
+    return;
+  }
+  const token = createSession(user);
+  res.json({ token, username: user, ...status });
+});
+
+app.get("/api/auth/me", (req, res) => {
+  const user = getSessionUser(bearerToken(req));
+  if (!user) {
+    res.status(401).json({ error: "Not logged in" });
+    return;
+  }
+  const status = getAccountStatus(user);
+  if (status.accessBlocked) {
+    destroySession(bearerToken(req));
+    blockedLoginResponse(res, status);
+    return;
+  }
+  res.json({ username: user, ...status });
+});
+
+app.post("/api/auth/logout", (req, res) => {
+  destroySession(bearerToken(req));
+  res.json({ ok: true });
+});
+
+app.post("/api/generate", requireAuth, async (req, res) => {
+  const authUser = req.authUser;
+  const statusBefore = getAccountStatus(authUser);
+  if (statusBefore.accessBlocked) {
+    const code = statusBefore.membership.isExpired ? "MEMBERSHIP_EXPIRED" : "PAYMENT_REQUIRED";
+    res.status(403).json({
+      error: statusBefore.blockReason,
+      code,
+      ...statusBefore,
+    });
+    return;
+  }
+
   if (!API_KEY) {
     const hint =
       API_KEY_RAW && API_KEY_RAW.trim()
@@ -324,14 +395,28 @@ app.post("/api/generate", async (req, res) => {
       contentStr = "";
     }
 
+    const accountStatus = recordSuccessfulGeneration(authUser);
     res.json({
       content: contentStr,
       raw: data,
+      quota: {
+        used: accountStatus.used,
+        remaining: accountStatus.remaining,
+        freeLimit: accountStatus.freeLimit,
+        paymentRequired: accountStatus.paymentRequired,
+      },
+      membership: accountStatus.membership,
+      accessBlocked: accountStatus.accessBlocked,
+      blockReason: accountStatus.blockReason,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     res.status(500).json({ error: msg });
   }
+});
+
+app.get("/api/quota", requireAuth, (req, res) => {
+  res.json(getAccountStatus(req.authUser));
 });
 
 const isProd = process.env.NODE_ENV === "production";

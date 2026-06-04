@@ -1,5 +1,7 @@
 node_modules
 dist
 .env
+ACCOUNTS.local.md
+server/usage.json
 .DS_Store
 *.log

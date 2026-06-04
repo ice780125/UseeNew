@@ -1,5 +1,13 @@
 import type { MutableRefObject } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ExpiryModal } from "./ExpiryModal";
+import {
+  MEMBERSHIP_EXPIRED_MSG,
+  PAYMENT_REQUIRED_MSG,
+  authFetch,
+  type MembershipInfo,
+  type QuotaInfo,
+} from "./auth";
 import {
   buildOutputSizeBlock,
   CANVAS_CUSTOM_ID,
@@ -7,6 +15,14 @@ import {
   CANVAS_PRESETS,
   parsePositiveInt,
 } from "./canvasPresets";
+
+type AppProps = {
+  username: string;
+  quota: QuotaInfo;
+  membership: MembershipInfo;
+  onLogout: (paywallMessage?: string) => void | Promise<void>;
+  onSessionUpdate: (patch: { quota?: QuotaInfo; membership?: MembershipInfo }) => void;
+};
 
 type GenState = "idle" | "loading" | "error" | "done";
 
@@ -44,6 +60,38 @@ function saveHistoryToStorage(items: GenerationHistoryItem[]) {
   } catch {
     /* quota / private mode */
   }
+}
+
+function exportAllImageLinks(
+  history: GenerationHistoryItem[],
+  extraUrls: string[]
+): { text: string; count: number } {
+  const lines: string[] = [];
+  const seen = new Set<string>();
+  for (const h of history) {
+    const url = h.imageUrl?.trim();
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    const note = [shortTime(h.at), h.promptLabel].filter(Boolean).join(" · ");
+    lines.push(note ? `${url}\t# ${note}` : url);
+  }
+  for (const u of extraUrls) {
+    const url = u?.trim();
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    lines.push(url);
+  }
+  return { text: lines.join("\n"), count: lines.length };
+}
+
+function downloadTextFile(filename: string, content: string) {
+  const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+  const href = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = href;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(href);
 }
 
 function shortTime(ts: number): string {
@@ -120,7 +168,7 @@ function stopFakeProgress(
   }
 }
 
-export function App() {
+export function App({ username, quota, membership, onLogout, onSessionUpdate }: AppProps) {
   const [prompt, setPrompt] = useState("");
   const [filePreview1, setFilePreview1] = useState<string | null>(null);
   const [filePreview2, setFilePreview2] = useState<string | null>(null);
@@ -140,8 +188,36 @@ export function App() {
   const [chainedRefUrl, setChainedRefUrl] = useState<string | null>(null);
   /** After each success, set chain to the new image for the next run. */
   const [autoChainNext, setAutoChainNext] = useState(true);
+  const [linksSaveHint, setLinksSaveHint] = useState<string | null>(null);
+  const [showExpiryModal, setShowExpiryModal] = useState(false);
 
   useEffect(() => () => stopFakeProgress(progressIntervalRef), []);
+
+  useEffect(() => {
+    if (!membership.isLastDay || membership.isExpired) {
+      setShowExpiryModal(false);
+      return;
+    }
+    const key = `usee-expiry-warn-${username}-${membership.expiresAt ?? "x"}`;
+    if (sessionStorage.getItem(key)) return;
+    setShowExpiryModal(true);
+  }, [username, membership.isLastDay, membership.isExpired, membership.expiresAt]);
+
+  const dismissExpiryModal = () => {
+    const key = `usee-expiry-warn-${username}-${membership.expiresAt ?? "x"}`;
+    try {
+      sessionStorage.setItem(key, "1");
+    } catch {
+      /* ignore */
+    }
+    setShowExpiryModal(false);
+  };
+
+  useEffect(() => {
+    if (!linksSaveHint) return;
+    const t = setTimeout(() => setLinksSaveHint(null), 3200);
+    return () => clearTimeout(t);
+  }, [linksSaveHint]);
 
   useEffect(() => {
     setGenerationHistory(loadHistoryFromStorage());
@@ -151,11 +227,6 @@ export function App() {
     saveHistoryToStorage(generationHistory);
   }, [generationHistory]);
 
-  const onPickFile = useCallback((slot: 0 | 1, file: File | undefined) => {
-    const setPrev = slot === 0 ? setFilePreview1 : setFilePreview2;
-    readImageFile(file, setPrev);
-  }, []);
-
   const generatedImages = useMemo(() => {
     const raw = posterUrls.length
       ? posterUrls
@@ -164,6 +235,24 @@ export function App() {
         : [];
     return firstImageOnly(raw);
   }, [posterUrls, resultText]);
+
+  const saveAllLinks = useCallback(() => {
+    const extras = [...posterUrls, ...generatedImages];
+    const { text, count } = exportAllImageLinks(generationHistory, extras);
+    if (count === 0) {
+      setLinksSaveHint("No image links to save yet");
+      return;
+    }
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+    downloadTextFile(`usee-links-${stamp}.txt`, text);
+    void navigator.clipboard?.writeText(text).catch(() => {});
+    setLinksSaveHint(`Saved ${count} link${count === 1 ? "" : "s"} (file + clipboard)`);
+  }, [generationHistory, posterUrls, generatedImages]);
+
+  const onPickFile = useCallback((slot: 0 | 1, file: File | undefined) => {
+    const setPrev = slot === 0 ? setFilePreview1 : setFilePreview2;
+    readImageFile(file, setPrev);
+  }, []);
 
   const generate = async () => {
     const p = prompt.trim();
@@ -214,7 +303,7 @@ export function App() {
         prompt: fullPrompt,
         ...(imgs.length ? { imageDataUrls: imgs } : {}),
       });
-      const res = await fetch("/api/generate", {
+      const res = await authFetch("/api/generate", {
         method: "POST",
         headers: {
           "Content-Type": "application/json; charset=utf-8",
@@ -222,8 +311,54 @@ export function App() {
         body: new TextEncoder().encode(payload),
       });
       const data = await res.json().catch(() => ({}));
+      if (res.status === 401) {
+        await onLogout();
+        throw new Error("Session expired — please sign in again");
+      }
+      if (res.status === 403) {
+        const msg =
+          data.code === "MEMBERSHIP_EXPIRED"
+            ? MEMBERSHIP_EXPIRED_MSG
+            : typeof data.error === "string"
+              ? data.error
+              : PAYMENT_REQUIRED_MSG;
+        await onLogout(msg);
+        throw new Error(msg);
+      }
       if (!res.ok) {
         throw new Error(data.error || `Request failed (${res.status})`);
+      }
+      if (data.quota && typeof data.quota === "object") {
+        const q = data.quota as QuotaInfo;
+        const nextQuota: QuotaInfo = {
+          used: Number(q.used) || 0,
+          remaining: Number(q.remaining) || 0,
+          freeLimit: Number(q.freeLimit) || 3,
+          paymentRequired: Boolean(q.paymentRequired),
+        };
+        const patch: { quota: QuotaInfo; membership?: MembershipInfo } = { quota: nextQuota };
+        if (data.membership && typeof data.membership === "object") {
+          const m = data.membership as MembershipInfo;
+          patch.membership = {
+            startedAt: m.startedAt ?? null,
+            expiresAt: m.expiresAt ?? null,
+            daysTotal: Number(m.daysTotal) || 30,
+            daysRemaining: Number(m.daysRemaining) || 0,
+            isLastDay: Boolean(m.isLastDay),
+            isExpired: Boolean(m.isExpired),
+          };
+        }
+        onSessionUpdate(patch);
+        if (data.accessBlocked || nextQuota.paymentRequired) {
+          const msg =
+            typeof data.blockReason === "string"
+              ? data.blockReason
+              : nextQuota.paymentRequired
+                ? PAYMENT_REQUIRED_MSG
+                : MEMBERSHIP_EXPIRED_MSG;
+          await onLogout(msg);
+          return;
+        }
       }
       const content = typeof data.content === "string" ? data.content : "";
       stopFakeProgress(progressIntervalRef);
@@ -269,6 +404,18 @@ export function App() {
           <span className="tagline">
             Text-to-image · up to two reference frames · one output still
           </span>
+        </div>
+        <div className="session-bar">
+          <span className="session-user">{username}</span>
+          <span className="session-quota">
+            Free: {quota.remaining}/{quota.freeLimit}
+            {membership.expiresAt != null && !membership.isExpired
+              ? ` · ${membership.daysRemaining}d left`
+              : ""}
+          </span>
+          <button type="button" className="link-btn session-logout" onClick={() => void onLogout()}>
+            Sign out
+          </button>
         </div>
       </header>
 
@@ -508,13 +655,21 @@ export function App() {
                   </button>
                 ))}
               </div>
-              <button
-                type="button"
-                className="secondary-btn"
-                onClick={() => setChainedRefUrl(generatedImages[0])}
-              >
-                Use this result as before for next edit
-              </button>
+              <div className="output-actions">
+                <button
+                  type="button"
+                  className="secondary-btn"
+                  onClick={() => setChainedRefUrl(generatedImages[0])}
+                >
+                  Use this result as before for next edit
+                </button>
+                <button type="button" className="link-btn" onClick={saveAllLinks}>
+                  Save all links
+                </button>
+              </div>
+              {linksSaveHint && generationHistory.length === 0 && (
+                <p className="field-hint history-save-hint">{linksSaveHint}</p>
+              )}
             </div>
           )}
           {status === "done" && generatedImages.length === 0 && resultText && (
@@ -528,24 +683,30 @@ export function App() {
             <div className="history-bar">
               <div className="history-bar-head">
                 <span className="label">Generation history</span>
-                <button
-                  type="button"
-                  className="link-btn"
-                  onClick={() => {
-                    setGenerationHistory([]);
-                    try {
-                      localStorage.removeItem(HISTORY_STORAGE_KEY);
-                    } catch {
-                      /* ignore */
-                    }
-                  }}
-                >
-                  Clear all
-                </button>
+                <div className="history-bar-actions">
+                  <button type="button" className="link-btn" onClick={saveAllLinks}>
+                    Save all links
+                  </button>
+                  <button
+                    type="button"
+                    className="link-btn"
+                    onClick={() => {
+                      setGenerationHistory([]);
+                      try {
+                        localStorage.removeItem(HISTORY_STORAGE_KEY);
+                      } catch {
+                        /* ignore */
+                      }
+                    }}
+                  >
+                    Clear all
+                  </button>
+                </div>
               </div>
+              {linksSaveHint && <p className="field-hint history-save-hint">{linksSaveHint}</p>}
               <p className="field-hint history-bar-hint">
                 Newest on the right. Click thumb to preview; use “Chain” to use that frame before the next
-                generation.
+                generation. “Save all links” exports every history URL to a .txt file and copies to clipboard.
               </p>
               <div className="history-strip" role="list">
                 {generationHistory.map((h) => (
@@ -574,6 +735,10 @@ export function App() {
           )}
         </section>
       </main>
+
+      {showExpiryModal && (
+        <ExpiryModal expiresAt={membership.expiresAt} onDismiss={dismissExpiryModal} />
+      )}
 
       {lightbox && (
         <button
