@@ -31,6 +31,11 @@ npm start
 - Start command: `npm start`  
 - Set env vars in the dashboard.
 
+**Netlify (static UI only)**  
+- Use repo `netlify.toml` — build runs on Linux x64.  
+- Do **not** add `@rollup/rollup-darwin-*` to `package.json`; Rollup picks the correct optional binary per OS.  
+- `/api/*` needs a Node host (Railway/Render) or Netlify Functions — static deploy alone cannot run `server/index.js`.
+
 **Docker** (outline)
 
 ```dockerfile

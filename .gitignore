@@ -3,5 +3,7 @@ dist
 .env
 ACCOUNTS.local.md
 server/usage.json
+Usee-github-upload/
+Usee-github-upload.zip
 .DS_Store
 *.log

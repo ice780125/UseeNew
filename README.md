@@ -37,6 +37,19 @@ Open http://localhost:5173
 - `.env` — API keys
 - `ACCOUNTS.local.md` — plaintext passwords
 - `server/usage.json` — per-user usage / membership start times
+- `node_modules/` — thousands of files; run `npm install` after clone
+
+## Upload to GitHub
+
+**Recommended:** `git push` (only ~26 files are tracked — no need to merge code).
+
+If you must use the website “Upload files” (100-file limit), do **not** drag the whole folder. Run:
+
+```bash
+bash scripts/pack-for-github.sh
+```
+
+Then upload only `Usee-github-upload.zip` or the `Usee-github-upload/` folder (~26 files).
 
 ## Production
 
