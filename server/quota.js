@@ -50,7 +50,7 @@ function setRecord(username, record) {
   writeStore(data);
 }
 
-/** Mark membership start on first login / use (30-day window from this moment). */
+/** Mark membership start on first successful login (30-day window from that moment). */
 export function ensureMembershipStarted(username) {
   const rec = getRecord(username);
   if (rec.startedAt) return rec.startedAt;
@@ -92,7 +92,6 @@ export function getMembershipInfo(username) {
 }
 
 export function isMembershipExpired(username) {
-  ensureMembershipStarted(username);
   return getMembershipInfo(username).isExpired;
 }
 
@@ -108,7 +107,6 @@ export function getQuotaInfo(username) {
 }
 
 export function getAccountStatus(username) {
-  ensureMembershipStarted(username);
   const membership = getMembershipInfo(username);
   const quota = getQuotaInfo(username);
   return {

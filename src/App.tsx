@@ -409,8 +409,8 @@ export function App({ username, quota, membership, onLogout, onSessionUpdate }: 
           <span className="session-user">{username}</span>
           <span className="session-quota">
             Free: {quota.remaining}/{quota.freeLimit}
-            {membership.expiresAt != null && !membership.isExpired
-              ? ` · ${membership.daysRemaining}d left`
+            {membership.startedAt != null && membership.expiresAt != null && !membership.isExpired
+              ? ` · 会员剩余 ${membership.daysRemaining} 天（至 ${new Date(membership.expiresAt).toLocaleDateString()})`
               : ""}
           </span>
           <button type="button" className="link-btn session-logout" onClick={() => void onLogout()}>

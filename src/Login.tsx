@@ -65,7 +65,7 @@ export function Login({ paywallMessage, onSuccess }: Props) {
               autoComplete="username"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              placeholder="Onekey001"
+              placeholder="onekey001"
               required
               disabled={loading}
             />
