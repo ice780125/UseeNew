@@ -6,7 +6,7 @@ AI poster / image tool (React + Vite + Express). Proxies [AIHubMix](https://aihu
 
 - Text-to-image with optional reference frames (chain edits)
 - Platform size presets (Douyin, Xiaohongshu, Taobao, LinkedIn, …)
-- Login: 30 accounts (`Onekey001` … `Onekey030`), 3 free generations each, 30-day membership
+- Login: 5 accounts (`onekey001` … `onekey005`), 3 free generations each, 30-day membership
 - Save all generated image links to a file
 
 ## Local development
