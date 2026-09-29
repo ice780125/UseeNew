@@ -9,6 +9,9 @@ export const FREE_QUOTA = Number(process.env.SEE_FREE_QUOTA) || 3;
 export const MEMBERSHIP_DAYS = Number(process.env.SEE_MEMBERSHIP_DAYS) || 30;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
+/** Set SEE_PAYWALL=1 to re-enable free-quota / membership paywall. Off by default. */
+export const PAYWALL_ENABLED = process.env.SEE_PAYWALL === "1";
+
 export const PAYMENT_REQUIRED_MSG = "需要付费使用";
 export const MEMBERSHIP_EXPIRED_MSG = "会员已到期，需要付费使用";
 export const MEMBERSHIP_LAST_DAY_MSG = "会员即将到期，还剩最后一天";
@@ -102,13 +105,22 @@ export function getQuotaInfo(username) {
     used,
     remaining,
     freeLimit: FREE_QUOTA,
-    paymentRequired: used >= FREE_QUOTA,
+    paymentRequired: PAYWALL_ENABLED && used >= FREE_QUOTA,
   };
 }
 
 export function getAccountStatus(username) {
   const membership = getMembershipInfo(username);
   const quota = getQuotaInfo(username);
+  if (!PAYWALL_ENABLED) {
+    return {
+      ...quota,
+      paymentRequired: false,
+      membership,
+      accessBlocked: false,
+      blockReason: null,
+    };
+  }
   return {
     ...quota,
     membership,
@@ -122,10 +134,11 @@ export function getAccountStatus(username) {
 }
 
 export function isQuotaExhausted(username) {
-  return getUsageCount(username) >= FREE_QUOTA;
+  return PAYWALL_ENABLED && getUsageCount(username) >= FREE_QUOTA;
 }
 
 export function isAccessBlocked(username) {
+  if (!PAYWALL_ENABLED) return false;
   const s = getAccountStatus(username);
   return s.accessBlocked;
 }

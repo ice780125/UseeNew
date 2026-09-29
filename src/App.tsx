@@ -349,13 +349,11 @@ export function App({ username, quota, membership, onLogout, onSessionUpdate }: 
           };
         }
         onSessionUpdate(patch);
-        if (data.accessBlocked || nextQuota.paymentRequired) {
+        if (data.accessBlocked) {
           const msg =
             typeof data.blockReason === "string"
               ? data.blockReason
-              : nextQuota.paymentRequired
-                ? PAYMENT_REQUIRED_MSG
-                : MEMBERSHIP_EXPIRED_MSG;
+              : PAYMENT_REQUIRED_MSG;
           await onLogout(msg);
           return;
         }

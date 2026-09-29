@@ -74,23 +74,28 @@ function parseSession(data: Record<string, unknown>): SessionInfo | null {
   if (typeof data.username !== "string") return null;
   const quota = parseQuota(data);
   const membership = parseMembership(data);
-  if (data.accessBlocked || membership.isExpired || quota.paymentRequired) {
+  // Only hard-block when the server says so (paywall can be disabled server-side).
+  if (data.accessBlocked) {
     return null;
   }
   return { username: data.username, quota, membership };
 }
 
 function accessDeniedError(data: Record<string, unknown>): Error & { code?: string } {
+  const code =
+    data.code === "MEMBERSHIP_EXPIRED" || data.code === "PAYMENT_REQUIRED"
+      ? data.code
+      : undefined;
   const msg =
     typeof data.error === "string"
       ? data.error
-      : data.code === "MEMBERSHIP_EXPIRED"
+      : code === "MEMBERSHIP_EXPIRED"
         ? MEMBERSHIP_EXPIRED_MSG
-        : PAYMENT_REQUIRED_MSG;
+        : code === "PAYMENT_REQUIRED"
+          ? PAYMENT_REQUIRED_MSG
+          : "Login failed";
   const err = new Error(msg) as Error & { code?: string };
-  if (data.code === "MEMBERSHIP_EXPIRED" || data.code === "PAYMENT_REQUIRED") {
-    err.code = data.code;
-  }
+  if (code) err.code = code;
   return err;
 }
 
