@@ -27,8 +27,8 @@ Open http://localhost:5173
 | Variable | Description |
 |----------|-------------|
 | `AIHUBMIX_API_KEY` | Required — from AIHubMix console |
-| `AIHUBMIX_BASE_URL` | Optional, default `https://aihubmix.com/v1` |
-| `AIHUBMIX_MODEL` | Optional, default `web-gpt-image-2` |
+| `AIHUBMIX_BASE_URL` | Optional, default `https://api.inferera.com/ai/v1` |
+| `AIHUBMIX_MODEL` | Optional, default `gpt-image-2.5-flare` |
 | `SEE_FREE_QUOTA` | Free images per account (default `3`) |
 | `SEE_MEMBERSHIP_DAYS` | Membership length in days (default `30`) |
 

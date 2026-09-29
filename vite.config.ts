@@ -9,6 +9,9 @@ export default defineConfig({
       "/api": {
         target: "http://127.0.0.1:3847",
         changeOrigin: true,
+        // Sync image generation can take minutes
+        timeout: 300_000,
+        proxyTimeout: 300_000,
       },
     },
   },

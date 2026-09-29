@@ -9,8 +9,8 @@ Architecture: one Node process serves **static UI** (`dist/`) and **`/api/*`** (
 | `AIHUBMIX_API_KEY` | Yes | `sk-...` |
 | `NODE_ENV` | Yes for static UI | `production` |
 | `PORT` | Usually auto | Railway/Render set this |
-| `AIHUBMIX_BASE_URL` | Optional | `https://aihubmix.com/v1` |
-| `AIHUBMIX_MODEL` | Optional | `web-gpt-image-2` |
+| `AIHUBMIX_BASE_URL` | Optional | `https://api.inferera.com/ai/v1` |
+| `AIHUBMIX_MODEL` | Optional | `gpt-image-2.5-flare` |
 
 Never commit `.env`. Never expose the key in the frontend bundle.
 

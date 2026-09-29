@@ -1,5 +1,5 @@
 /**
- * 本地代理：将密钥留在服务端，转发 OpenAI 兼容请求到 AIHubMix。
+ * 本地代理：将密钥留在服务端，转发 AIHubMix 同步图片生成请求。
  * 生产环境同时托管 Vite 构建后的静态站点（dist/）。
  */
 import "dotenv/config";
@@ -29,10 +29,10 @@ const DIST_DIR = path.join(__dirname, "..", "dist");
 
 /** 云平台常用 PORT；本地开发仍可用 SEE_API_PORT */
 const PORT = Number(process.env.PORT || process.env.SEE_API_PORT) || 3847;
-const BASE_URL = (process.env.AIHUBMIX_BASE_URL || "https://aihubmix.com/v1").replace(
-  /\/$/,
-  ""
-);
+/** 默认同步 Image API：POST {BASE}/images/generations */
+const BASE_URL = (
+  process.env.AIHUBMIX_BASE_URL || "https://api.inferera.com/ai/v1"
+).replace(/\/$/, "");
 /**
  * Authorization 头只能是 Latin-1；从 .env 原样里抽出 sk- 开头的 ASCII 密钥，
  * 避免「整段 strip 非 ASCII」把合法 key 清空（全角引号、homoglyph 等）。
@@ -56,7 +56,9 @@ function normalizeApiKey(raw) {
 
 const API_KEY_RAW = process.env.AIHUBMIX_API_KEY;
 const API_KEY = normalizeApiKey(API_KEY_RAW);
-const MODEL = process.env.AIHUBMIX_MODEL || "web-gpt-image-2";
+const MODEL = process.env.AIHUBMIX_MODEL || "gpt-image-2.5-flare";
+const GENERATE_TIMEOUT_MS = Number(process.env.AIHUBMIX_GENERATE_TIMEOUT_MS) || 180_000;
+const CONTENT_URL_TIMEOUT_MS = 45_000;
 
 const app = express();
 app.use(cors({ origin: true }));
@@ -173,6 +175,88 @@ async function resolveAllImageRefs(urls) {
   return out;
 }
 
+/** Strip data-URI prefix if present; AIHubMix accepts data URI, URL, or raw base64. */
+function normalizeB64Json(b64) {
+  if (typeof b64 !== "string" || !b64) return "";
+  const trimmed = b64.trim();
+  const m = trimmed.match(/^data:image\/[a-zA-Z0-9.+-]+;base64,(.+)$/s);
+  return m ? m[1].replace(/\s/g, "") : trimmed.replace(/\s/g, "");
+}
+
+/**
+ * content_url 需带同一 Bearer，且约 30 分钟过期 — 立刻拉成 data URL 再回给前端。
+ */
+async function fetchAuthorizedImageAsDataUrl(contentUrl, apiKey) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), CONTENT_URL_TIMEOUT_MS);
+  try {
+    const res = await fetch(contentUrl, {
+      method: "GET",
+      redirect: "follow",
+      signal: ctrl.signal,
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        Accept: "image/*,*/*;q=0.8",
+      },
+    });
+    if (!res.ok) {
+      throw new Error(`content_url download HTTP ${res.status}`);
+    }
+    const ab = await res.arrayBuffer();
+    const buf = Buffer.from(ab);
+    if (buf.length > MAX_IMAGE_FETCH_BYTES) {
+      throw new Error("Generated image too large");
+    }
+    let ct = (res.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+    if (!ct.startsWith("image/")) {
+      ct = guessMimeFromMagic(buf) || "image/png";
+    }
+    return `data:${ct};base64,${buf.toString("base64")}`;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg === "This operation was aborted" || msg.includes("aborted")) {
+      throw new Error("content_url download timed out");
+    }
+    throw e instanceof Error ? e : new Error(msg);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Map AIHubMix task output item → durable data URL for the browser. */
+async function materializeOutputItem(item, apiKey) {
+  if (!item || typeof item !== "object") return null;
+  const b64 = normalizeB64Json(item.b64_json);
+  if (b64) {
+    const fmt =
+      typeof item.content_type === "string" && item.content_type.startsWith("image/")
+        ? item.content_type
+        : "image/png";
+    return `data:${fmt};base64,${b64}`;
+  }
+  if (typeof item.content_url === "string" && item.content_url) {
+    return fetchAuthorizedImageAsDataUrl(item.content_url, apiKey);
+  }
+  return null;
+}
+
+function buildImagePrompt(userPrompt, refCount) {
+  if (refCount <= 0) return userPrompt;
+  if (refCount === 1) {
+    return (
+      "Edit the provided reference image according to the instruction below. " +
+      "Preserve overall composition, subject placement, and style unless the user explicitly asks otherwise. " +
+      "Do not ignore the reference and invent an unrelated scene.\n\n" +
+      userPrompt
+    );
+  }
+  return (
+    "You are given multiple reference images. Treat the first as the base canvas and fuse later ones as additional references. " +
+    "Follow the instruction below; do not ignore the references.\n\n" +
+    userPrompt
+  );
+}
+
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, model: MODEL });
 });
@@ -277,7 +361,7 @@ app.post("/api/generate", requireAuth, async (req, res) => {
     imageUrls.push(imageDataUrl);
   }
 
-  /** Inline remote URLs so upstream vision always receives image bytes (URLs alone often fail). */
+  /** Inline remote URLs so upstream always receives image bytes (URLs alone often fail). */
   let resolvedImageUrls;
   try {
     resolvedImageUrls = await resolveAllImageRefs(imageUrls);
@@ -287,69 +371,32 @@ app.post("/api/generate", requireAuth, async (req, res) => {
     return;
   }
 
-  /** @type {Array<{ type: string; text?: string; image_url?: { url: string; detail?: string } }>} */
-  const content = [];
-  const imgDetailEnv = process.env.AIHUBMIX_IMAGE_DETAIL;
-  function imagePart(url) {
-    const image_url =
-      imgDetailEnv && imgDetailEnv !== "off"
-        ? { url, detail: imgDetailEnv }
-        : { url };
-    return { type: "image_url", image_url };
-  }
-
-  if (resolvedImageUrls.length === 0) {
-    content.push({ type: "text", text: trimmed });
-  } else if (resolvedImageUrls.length === 1) {
-    content.push({
-      type: "text",
-      text:
-        "以下是一张参考图（图1），通常为上一轮生成结果。你必须在这张图的像素基础上做编辑：保留整体构图、主体位置与风格气质，除非用户明确要求推翻重做。禁止无视图1另起一张无关的新图。用户指令如下：",
-    });
-    content.push(imagePart(resolvedImageUrls[0]));
-    content.push({ type: "text", text: trimmed });
-  } else {
-    content.push({
-      type: "text",
-      text: "以下是两张参考图：先出现的为图1（可为上一轮产出），后面一张为图2。必须在图1基础上融合图2并完成指令；禁止无视参考图从零生成无关画面。",
-    });
-    content.push(imagePart(resolvedImageUrls[0]));
-    content.push({
-      type: "text",
-      text: "（上图即图1）",
-    });
-    content.push(imagePart(resolvedImageUrls[1]));
-    content.push({
-      type: "text",
-      text: `（上图即图2）\n\n用户指令：\n${trimmed}`,
-    });
-  }
-
-  const systemText =
-    resolvedImageUrls.length > 0
-      ? `你是图像编辑与设计助手。本条消息内已包含 ${resolvedImageUrls.length} 张参考图（内联为可直接读取的图像数据）；你必须严格基于这些画面完成用户指令，禁止假装未收到图、禁止要求再次上传。输出一张最终成品图（单幅），不要组图或九宫格。`
-      : "你是海报设计助手。每次请求只输出一张最终成品海报（单幅完整画面），不要组图、分镜、九宫格或多张并列预览。";
-
+  /** @type {Record<string, unknown>} */
   const body = {
     model: MODEL,
-    messages: [
-      {
-        role: "system",
-        content: systemText,
-      },
-      { role: "user", content },
-    ],
+    prompt: buildImagePrompt(trimmed, resolvedImageUrls.length),
+    n: 1,
+    output_format: "png",
   };
+  if (resolvedImageUrls.length === 1) {
+    body.image = resolvedImageUrls[0];
+  } else if (resolvedImageUrls.length > 1) {
+    body.images = resolvedImageUrls;
+  }
+
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), GENERATE_TIMEOUT_MS);
 
   try {
     const payload = JSON.stringify(body);
-    const upstream = await fetch(`${BASE_URL}/chat/completions`, {
+    const upstream = await fetch(`${BASE_URL}/images/generations`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${API_KEY}`,
         "Content-Type": "application/json; charset=utf-8",
       },
       body: Buffer.from(payload, "utf8"),
+      signal: ctrl.signal,
     });
 
     const text = await upstream.text();
@@ -368,32 +415,62 @@ app.post("/api/generate", requireAuth, async (req, res) => {
       const msg =
         data?.error?.message ||
         data?.message ||
+        (typeof data?.error === "string" ? data.error : null) ||
         `HTTP ${upstream.status}`;
       res.status(502).json({ error: msg, upstream: data });
       return;
     }
 
-    const choice = data?.choices?.[0];
-    const message = choice?.message;
-    const rawContent = message?.content;
-
-    let contentStr;
-    if (typeof rawContent === "string") {
-      contentStr = rawContent;
-    } else if (Array.isArray(rawContent)) {
-      contentStr = rawContent
-        .map((part) => {
-          if (part?.type === "text" && part.text) return part.text;
-          if (part?.type === "image_url" && part.image_url?.url) return part.image_url.url;
-          return "";
-        })
-        .filter(Boolean)
-        .join("\n");
-    } else if (rawContent != null) {
-      contentStr = JSON.stringify(rawContent);
-    } else {
-      contentStr = "";
+    const status = typeof data?.status === "string" ? data.status : "";
+    if (status && status !== "completed") {
+      const errMsg =
+        data?.error?.message ||
+        (typeof data?.error === "string" ? data.error : null) ||
+        `Image task status: ${status}`;
+      res.status(502).json({ error: errMsg, upstream: data });
+      return;
     }
+
+    const output = Array.isArray(data?.output) ? data.output : [];
+    /** @type {string[]} */
+    const dataUrls = [];
+    for (const item of output) {
+      try {
+        const url = await materializeOutputItem(item, API_KEY);
+        if (url) dataUrls.push(url);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        res.status(502).json({ error: `Failed to materialize image output: ${msg}`, upstream: data });
+        return;
+      }
+    }
+
+    // OpenAI-compat fallback: { data: [{ b64_json | url }] }
+    if (dataUrls.length === 0 && Array.isArray(data?.data)) {
+      for (const item of data.data) {
+        try {
+          const url = await materializeOutputItem(item, API_KEY);
+          if (url) dataUrls.push(url);
+          else if (typeof item?.url === "string" && item.url) {
+            dataUrls.push(item.url);
+          }
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          res.status(502).json({ error: `Failed to materialize image output: ${msg}`, upstream: data });
+          return;
+        }
+      }
+    }
+
+    if (dataUrls.length === 0) {
+      res.status(502).json({
+        error: "Upstream returned no image output (expected b64_json or content_url)",
+        upstream: data,
+      });
+      return;
+    }
+
+    const contentStr = dataUrls.map((u) => `![](${u})`).join("\n");
 
     const accountStatus = recordSuccessfulGeneration(authUser);
     res.json({
@@ -411,7 +488,13 @@ app.post("/api/generate", requireAuth, async (req, res) => {
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
+    if (msg === "This operation was aborted" || msg.includes("aborted")) {
+      res.status(504).json({ error: `Image generation timed out after ${GENERATE_TIMEOUT_MS}ms` });
+      return;
+    }
     res.status(500).json({ error: msg });
+  } finally {
+    clearTimeout(timer);
   }
 });
 
